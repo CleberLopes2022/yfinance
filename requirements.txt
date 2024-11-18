@@ -1,3 +1,4 @@
 sklearn
 joblib
 dateutil
+yfinance==0.2.4
