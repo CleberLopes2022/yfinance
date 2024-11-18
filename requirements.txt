@@ -1,6 +1,5 @@
 streamlit
 scikit-learn
-joblib
 dateutil
 yfinance
 pandas 
