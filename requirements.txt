@@ -1,0 +1,4 @@
+yfinance
+sklearn
+joblib
+dateutil
