@@ -11,12 +11,11 @@ import altair as alt
 # Configurações da página
 st.set_page_config(page_title="Análise de Ações", layout="wide")
 
-# Título e seção
 st.write("---")
 st.title("Preço de Ativo")
 st.write("---")
 
-# Sidebar para seleção de ações
+# Sidebar
 with st.sidebar:
     st.image("shutterstock_349461494.jpg")
     st.header("Ações")
@@ -25,39 +24,29 @@ with st.sidebar:
         ("PETR4.SA", "BBAS3.SA", "VALE3.SA", "COGN3.SA"),
         index=0
     )
-    
-    # Data inicial (10 anos atrás a partir de hoje)
     default_start_date = datetime.now().date() - relativedelta(years=10)
     inicio = st.date_input("Escolha a data de início", value=default_start_date)
-    
-    # Data final (data atual)
     final = st.date_input("Escolha a data final", value=datetime.now().date())
 
-# Verificação de entradas
 if tickerSimbolo and inicio and final:
-    # Obtenção dos dados da ação (sem period)
     tickerData = yf.Ticker(tickerSimbolo)
     tickerDF = tickerData.history(start=inicio, end=final)
 
     if not tickerDF.empty:
-        # Colunas para gráficos
+        # Gráficos interativos
         col1, col2 = st.columns(2)
 
         with col1:
             st.header("Gráfico de Fechamento")
             chart_close = alt.Chart(tickerDF.reset_index()).mark_line(color="blue").encode(
-                x="Date:T",
-                y="Close:Q",
-                tooltip=["Date:T", "Close:Q"]
+                x="Date:T", y="Close:Q", tooltip=["Date:T", "Close:Q"]
             ).interactive()
             st.altair_chart(chart_close, use_container_width=True)
 
         with col2:
             st.header("Gráfico de Volume")
             chart_volume = alt.Chart(tickerDF.reset_index()).mark_area(color="orange", opacity=0.6).encode(
-                x="Date:T",
-                y="Volume:Q",
-                tooltip=["Date:T", "Volume:Q"]
+                x="Date:T", y="Volume:Q", tooltip=["Date:T", "Volume:Q"]
             ).interactive()
             st.altair_chart(chart_volume, use_container_width=True)
 
@@ -65,52 +54,62 @@ if tickerSimbolo and inicio and final:
         st.title("Previsão de Ações")
         st.write("---")
 
-        # Preparação dos dados
+        # Features
         tickerDF["Price_Change"] = tickerDF["Close"] - tickerDF["Open"]
         tickerDF["SMA_10"] = tickerDF["Close"].rolling(window=10).mean()
         tickerDF = tickerDF.dropna()
 
         x = tickerDF[["Open", "High", "Low", "Volume", "Price_Change", "SMA_10"]].to_numpy()
-
         scaler = StandardScaler()
         x = scaler.fit_transform(x)
 
         modelo_path = "modelo_random_forest.joblib"
-
         try:
             modelo_carregado = joblib.load(modelo_path)
             st.success("Modelo carregado com sucesso.")
         except FileNotFoundError:
-            st.error("O arquivo do modelo salvo não foi encontrado. Certifique-se de que 'modelo_random_forest.joblib' está no diretório correto.")
+            st.error("O arquivo do modelo salvo não foi encontrado.")
             st.stop()
 
-        # Previsão
+        # Previsão para múltiplos dias
+        dias_futuros = 7
         ultimos_valores = x[-1].reshape(1, -1)
-        previsao_futura = modelo_carregado.predict(ultimos_valores)
+        previsoes = []
 
-        with st.sidebar:
-            st.write("Previsão para Data Futura")
-            data_futura = st.date_input("Escolha uma data futura", value=datetime.now().date() + timedelta(days=5))
-        
-        st.subheader(f"**Previsão do preço de fechamento para {data_futura}: R$ {previsao_futura[0]:.2f}**")
+        for i in range(dias_futuros):
+            pred = modelo_carregado.predict(ultimos_valores)[0]
+            previsoes.append(pred)
 
-        # Comparativo real vs previsão
-        tickerDF["Previsao"] = np.nan
-        tickerDF.iloc[-1, tickerDF.columns.get_loc("Previsao")] = previsao_futura[0]
+            # Atualiza entrada simulando próximo dia
+            nova_linha = ultimos_valores.copy()
+            nova_linha[0, 0] = pred  # Open ~ previsão
+            nova_linha[0, 1] = pred * 1.01  # High (estimativa simples)
+            nova_linha[0, 2] = pred * 0.99  # Low (estimativa simples)
+            nova_linha[0, 4] = pred - nova_linha[0, 0]  # Price_Change
+            nova_linha[0, 5] = pred  # SMA_10 aproximada
+            ultimos_valores = nova_linha
 
-        chart_compare = alt.Chart(tickerDF.reset_index()).mark_line().encode(
-            x="Date:T",
-            y=alt.Y("value:Q", title="Preço"),
-            color="variable:N"
-        ).transform_fold(
-            ["Close", "Previsao"]
-        ).interactive()
+        # Datas futuras
+        datas_futuras = [tickerDF.index[-1] + timedelta(days=i+1) for i in range(dias_futuros)]
+        df_previsoes = pd.DataFrame({"Date": datas_futuras, "Previsao": previsoes})
 
-        st.header("Comparativo Real vs Previsão")
-        st.altair_chart(chart_compare, use_container_width=True)
+        # Gráfico comparativo
+        chart_compare = alt.Chart(tickerDF.reset_index()).mark_line(color="blue").encode(
+            x="Date:T", y="Close:Q"
+        ) + alt.Chart(df_previsoes).mark_line(color="red").encode(
+            x="Date:T", y="Previsao:Q"
+        )
+
+        st.header("Comparativo Real vs Previsões Futuras (7 dias)")
+        st.altair_chart(chart_compare.interactive(), use_container_width=True)
+
+        # Tabela de previsões
+        st.subheader("Tabela de Previsões")
+        st.dataframe(df_previsoes.set_index("Date"))
 
     else:
         st.warning("Não há dados disponíveis para o período selecionado.")
 else:
-    st.info("Por favor, selecione um ativo e o período de datas para exibir os gráficos e a previsão.")
+    st.info("Por favor, selecione um ativo e o período de datas.")
+
 
